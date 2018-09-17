@@ -85,7 +85,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         logging.log(level=logging.DEBUG, msg='Getting available content for type: "{0}"'.format(content_type))
         current_time = datetime.datetime.now(datetime.timezone.utc)
         end_time = str(current_time).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
-        start_time = str(current_time - datetime.timedelta(hours=1)).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
+        start_time = str(current_time - datetime.timedelta(hours=4)).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
         response = self.make_api_request(url='subscriptions/content?contentType={0}&startTime={1}&endTime={2}'.format(
             content_type, start_time, end_time))
         self.blobs_to_collect += response.json()
@@ -124,6 +124,8 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         :param save_as_file: save the messages to a file after receiving (Bool)
         :return:
         """
+        send_to_graylog = self.graylog_output
+        save_as_file = self.file_output
         if self.known_content and content_json['contentId'] in self.known_content:
             return
         try:
