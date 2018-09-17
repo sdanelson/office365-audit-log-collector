@@ -15,7 +15,7 @@ import ApiConnection
 class AuditLogCollector(ApiConnection.ApiConnection):
 
     def __init__(self, output_path, content_types, *args, graylog_address=None, graylog_port=None, graylog_output=False,
-                 file_output=False, **kwargs):
+                 file_output=False, time_window='4' **kwargs):
         """
         Object that can retrieve all available content blobs for a list of content types and then retrieve those
         blobs and output them to a file or Graylog input (i.e. send over a socket).
@@ -27,6 +27,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         self.graylog_output = graylog_output
         self.output_path = output_path
         self.content_types = content_types
+        self.time_window = int(time_window)
         self._known_content = {}
         self._graylog_interface = GraylogInterface.GraylogInterface(graylog_address=graylog_address,
                                                                     graylog_port=graylog_port)
@@ -85,7 +86,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         logging.log(level=logging.DEBUG, msg='Getting available content for type: "{0}"'.format(content_type))
         current_time = datetime.datetime.now(datetime.timezone.utc)
         end_time = str(current_time).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
-        start_time = str(current_time - datetime.timedelta(hours=4)).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
+        start_time = str(current_time - datetime.timedelta(hours=self.time_window)).replace(' ', 'T').rsplit('.', maxsplit=1)[0]
         response = self.make_api_request(url='subscriptions/content?contentType={0}&startTime={1}&endTime={2}'.format(
             content_type, start_time, end_time))
         self.blobs_to_collect += response.json()
@@ -225,6 +226,8 @@ if __name__ == "__main__":
                         dest='graylog_addr')
     parser.add_argument('-gP', metavar='graylog_port', type=str, help='Port of graylog server.', action='store',
                         dest='graylog_port')
+    parser.add_argument('-T', metavar='time_window', type=str, help='How many hours to retrieve from current time.', 
+                        action='store', dest='time_window')
     parser.add_argument('-d', action='store_true', dest='debug_logging',
                         help='Enable debug logging (generates large log files and decreases performance).')
     args = parser.parse_args()
@@ -250,7 +253,8 @@ if __name__ == "__main__":
                                   secret_key=argsdict['secret_key'], client_key=argsdict['client_key'],
                                   content_types=content_types, graylog_address=argsdict['graylog_addr'],
                                   graylog_port=argsdict['graylog_port'], graylog_output=argsdict['graylog'],
-                                  file_output=argsdict['file'], publisher_id=argsdict['publisher_id'])
+                                  file_output=argsdict['file'], publisher_id=argsdict['publisher_id'],
+                                  time_window=argsdict['time_window'])
     collector.run_once()
 
 
