@@ -15,7 +15,7 @@ import ApiConnection
 class AuditLogCollector(ApiConnection.ApiConnection):
 
     def __init__(self, output_path, content_types, *args, graylog_address=None, graylog_port=None, graylog_output=False,
-                 file_output=False, time_window='4' **kwargs):
+                 file_output=False, time_window='4', **kwargs):
         """
         Object that can retrieve all available content blobs for a list of content types and then retrieve those
         blobs and output them to a file or Graylog input (i.e. send over a socket).
@@ -28,6 +28,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         self.output_path = output_path
         self.content_types = content_types
         self.time_window = int(time_window)
+        self.thread_count = 0
         self._known_content = {}
         self._graylog_interface = GraylogInterface.GraylogInterface(graylog_address=graylog_address,
                                                                     graylog_port=graylog_port)
@@ -96,6 +97,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
             response = self.make_api_request(url=response.headers['NextPageUri'], append_url=False)
         self.content_types.remove(content_type)
         logging.log(level=logging.DEBUG, msg='Got {0} content blobs of type: "{1}"'.format(
+            # Bug - blobs_to_collect doesn't reset so the length is just for content type X but for all preceding
             len(self.blobs_to_collect), content_type))
 
     def monitor_blobs_to_collect(self):
@@ -105,7 +107,7 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         """
         self._graylog_interface.start()
         threads = deque()
-        while not (self.done_collecting_available_content and self.done_retrieving_content):
+        while not (self.done_collecting_available_content and self.done_retrieving_content and (self.thread_count == 0)):
             if not self.blobs_to_collect:
                 continue
             blob_json = self.blobs_to_collect.popleft()
@@ -113,7 +115,10 @@ class AuditLogCollector(ApiConnection.ApiConnection):
                 logging.log(level=logging.DEBUG, msg='Retrieving content blob: "{0}"'.format(blob_json))
                 threads.append(threading.Thread(target=self.retrieve_content, daemon=True,
                                                 kwargs={'content_json': blob_json}))
+                logging.log(level=logging.DEBUG, msg='Starting Thread')
+                self.thread_count += 1
                 threads[-1].start()
+        logging.log(level=logging.DEBUG, msg='Exiting monitor_blobs_to_collect')
         self._graylog_interface.stop()
 
     def retrieve_content(self, content_json, send_to_graylog=True, save_as_file=False):
@@ -125,23 +130,34 @@ class AuditLogCollector(ApiConnection.ApiConnection):
         :param save_as_file: save the messages to a file after receiving (Bool)
         :return:
         """
+        logging.log(level=logging.DEBUG, msg='Entering retrieve_content with blob: "{0}"'.format(content_json))
         send_to_graylog = self.graylog_output
         save_as_file = self.file_output
         if self.known_content and content_json['contentId'] in self.known_content:
+            logging.log(level=logging.DEBUG, msg='Do nothing')
+            self.thread_count -= 1
             return
         try:
             result = self.make_api_request(url=content_json['contentUri'], append_url=False).json()
             if not result:
+                logging.log(level=logging.DEBUG, msg='No results')
+                self.thread_count -= 1
                 return
         except:
+            logging.log(level=logging.DEBUG, msg='Exception Occured')
+            self.thread_count -= 1
             return
         else:
             self._add_known_content(content_id=content_json['contentId'],
                                     content_expiration=content_json['contentExpiration'])
             if save_as_file:
+                logging.log(level=logging.DEBUG, msg='Saving File')
                 self.output_results_to_file(results=result, content_id=content_json['contentId'])
             if send_to_graylog:
+                logging.log(level=logging.DEBUG, msg='Sending to Graylog')
                 self._graylog_interface.send_messages_to_graylog(*result)
+            self.thread_count -= 1
+        logging.log(level=logging.DEBUG, msg='Exiting retrieve_content')
 
     def output_results_to_file(self, results, content_id):
         """
